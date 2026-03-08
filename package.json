@@ -1,0 +1,31 @@
+{
+  "name": "sonnetics-js",
+  "version": "0.1.0",
+  "description": "Wake-word inference for JavaScript and TypeScript. High-level API over sonnetics-core.",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --no-dts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "sonnetics-core": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sonnetics/sonnetics-js"
+  },
+  "license": "Apache-2.0"
+}

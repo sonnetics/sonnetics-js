@@ -1,0 +1,113 @@
+/**
+ * Load model pack from URL or path. Extracts tar.gz, caches files.
+ * JS does not know what's inside; it just extracts and passes to Rust.
+ */
+
+import { decompressSync } from "fflate";
+import { getCached, setCached } from "./cache.js";
+
+export type ModelFiles = Record<string, ArrayBuffer>;
+
+/** Minimal tar parser. Extracts files into a map of path -> Uint8Array. */
+function parseTar(tar: Uint8Array): Record<string, Uint8Array> {
+  const files: Record<string, Uint8Array> = {};
+  let offset = 0;
+
+  while (offset + 512 <= tar.length) {
+    const name = parseTarString(tar, offset, 100);
+    if (!name) break;
+
+    const sizeStr = parseTarString(tar, offset + 124, 12);
+    const size = parseInt(sizeStr, 8) || 0;
+
+    const dataStart = offset + 512;
+    const dataEnd = dataStart + size;
+    if (dataEnd <= tar.length && size > 0) {
+      files[name] = tar.slice(dataStart, dataEnd);
+    }
+
+    offset = dataStart + ((size + 511) & ~511);
+  }
+  return files;
+}
+
+function parseTarString(arr: Uint8Array, start: number, len: number): string {
+  let end = start;
+  while (end < start + len && arr[end] !== 0) end++;
+  return new TextDecoder().decode(arr.subarray(start, end));
+}
+
+function extractFromTarGz(tarGz: Uint8Array): ModelFiles {
+  const tarBytes = decompressSync(tarGz);
+  const tar = parseTar(tarBytes);
+  const out: ModelFiles = {};
+  for (const [path, data] of Object.entries(tar)) {
+    out[path] = data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength
+    ) as ArrayBuffer;
+  }
+  return out;
+}
+
+/**
+ * Load model pack from URL. Fetches tar.gz, extracts all files, caches by filename.
+ */
+export async function loadModelPack(url: string): Promise<ModelFiles> {
+  const cached = await getCached(url);
+  if (cached) return cached;
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Failed to fetch model: ${response.statusText}`);
+  const tarGz = new Uint8Array(await response.arrayBuffer());
+  const files = extractFromTarGz(tarGz);
+  await setCached(url, files);
+  return files;
+}
+
+/**
+ * Load model pack from file path (Node.js only).
+ */
+export async function loadModelPackFromPath(path: string): Promise<ModelFiles> {
+  const key = `file:${path}`;
+  const cached = await getCached(key);
+  if (cached) return cached;
+
+  const { readFile } = await import("node:fs/promises");
+  const tarGz = new Uint8Array(await readFile(path));
+  const files = extractFromTarGz(tarGz);
+  await setCached(key, files);
+  return files;
+}
+
+const CDN_BASE = "https://cdn.sonnetics.com/models";
+
+/**
+ * Load model pack by model ID from CDN. Fetches sonnetics-model-{modelId}.tar.gz.
+ */
+export async function loadModelPackFromId(modelId: string): Promise<ModelFiles> {
+  const url = `${CDN_BASE}/sonnetics-model-${modelId}.tar.gz`;
+  return loadModelPack(url);
+}
+
+/** True if string looks like a UUID (with or without hyphens). */
+function isModelId(s: string): boolean {
+  const u = s.replace(/-/g, "").toLowerCase();
+  return /^[0-9a-f]{32}$/.test(u);
+}
+
+/**
+ * Load model pack from path or model ID.
+ * If pathOrId looks like a UUID, fetches from CDN; otherwise loads from local .tar.gz path.
+ */
+export async function loadModelPackFromPathOrId(
+  pathOrModelId: string
+): Promise<ModelFiles> {
+  if (isModelId(pathOrModelId)) {
+    return loadModelPackFromId(pathOrModelId);
+  }
+  if (!pathOrModelId.endsWith(".tar.gz")) {
+    throw new Error("Path must point to a .tar.gz file");
+  }
+  return loadModelPackFromPath(pathOrModelId);
+}
