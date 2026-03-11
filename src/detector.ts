@@ -3,7 +3,7 @@
  * Supports start()/stop() for mic capture and feed() for manual audio.
  */
 
-import { init, type WasmWakeEngine } from "sonnetics-core";
+import { init, type WasmWakeEngine } from "@sonnetics/core";
 import {
   loadModelPackFromPath,
   loadModelPackFromPathOrId,
@@ -18,6 +18,19 @@ export interface DetectorOptions {
   wakeWordPath?: string;
   /** Detection threshold 0–1. Default 0.25. */
   threshold?: number;
+  /** Samples per chunk (per channel). Affects onAudioChunk callback rate. Default 2048. */
+  chunkSize?: number;
+}
+
+/** Root-mean-square of audio samples. Use with onAudioChunk for level meters. */
+export function rms(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const x = samples[i];
+    sum += x * x;
+  }
+  return Math.sqrt(sum / samples.length);
 }
 
 export interface DetectEvent {
@@ -34,6 +47,12 @@ export interface DetectEvent {
 }
 
 const DEFAULT_THRESHOLD = 0.25;
+const DEFAULT_CHUNK_SIZE = 2048;
+
+/** Ensure plain object for WASM boundary (avoids "files must be an object" from IndexedDB/structured clone). */
+function toPlainObject(files: ModelFiles): Record<string, ArrayBuffer> {
+  return Object.fromEntries(Object.entries(files));
+}
 
 /**
  * Create a detector. Provide wakewordId or wakeWordPath.
@@ -41,7 +60,12 @@ const DEFAULT_THRESHOLD = 0.25;
 export async function createDetector(
   options: DetectorOptions
 ): Promise<WakeWordDetector> {
-  const { wakewordId, wakeWordPath, threshold = DEFAULT_THRESHOLD } = options;
+  const {
+    wakewordId,
+    wakeWordPath,
+    threshold = DEFAULT_THRESHOLD,
+    chunkSize = DEFAULT_CHUNK_SIZE,
+  } = options;
 
   let files: ModelFiles;
   if (wakewordId) {
@@ -55,12 +79,14 @@ export async function createDetector(
     throw new Error("Provide wakewordId or wakeWordPath");
   }
 
-  return new WakeWordDetector(files, threshold);
+  return new WakeWordDetector(files, threshold, chunkSize);
 }
 
 export interface WakewordCreateOptions {
   /** Detection threshold 0–1. Default 0.25. */
   threshold?: number;
+  /** Samples per chunk (per channel). Default 2048. */
+  chunkSize?: number;
 }
 
 /**
@@ -78,12 +104,11 @@ export const Wakeword = {
     const files = await loadModelPackFromPathOrId(pathOrModelId);
     return new WakeWordDetector(
       files,
-      options?.threshold ?? DEFAULT_THRESHOLD
+      options?.threshold ?? DEFAULT_THRESHOLD,
+      options?.chunkSize ?? DEFAULT_CHUNK_SIZE
     );
   },
 };
-
-const CHUNK_SIZE = 2048;
 
 interface DetectSession {
   buffer: Float32Array[];
@@ -110,9 +135,11 @@ function closeSession(session: DetectSession): void {
 export class WakeWordDetector {
   private files: ModelFiles;
   private threshold: number;
+  private chunkSize: number;
   private engine: WasmWakeEngine | null = null;
   private onDetectCallback: ((ev: DetectEvent) => void | Promise<void>) | null =
     null;
+  private onAudioChunkCallback: ((chunk: Float32Array) => void) | null = null;
   private context: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private activeSession: DetectSession | null = null;
@@ -122,12 +149,16 @@ export class WakeWordDetector {
   private stopped = false;
   private sampleRate: number = 16000; // set when start() or feed() first runs
 
-  constructor(files: ModelFiles, threshold: number) {
+  constructor(files: ModelFiles, threshold: number, chunkSize: number = DEFAULT_CHUNK_SIZE) {
     this.files = files;
     if (threshold < 0 || threshold > 1) {
       throw new Error("threshold must be between 0 and 1");
     }
+    if (chunkSize <= 0 || !Number.isInteger(chunkSize)) {
+      throw new Error("chunkSize must be a positive integer");
+    }
     this.threshold = threshold;
+    this.chunkSize = chunkSize;
   }
 
   /**
@@ -138,12 +169,35 @@ export class WakeWordDetector {
   }
 
   /**
-   * Start capturing and listening. Requires user gesture (e.g. click) for getUserMedia.
+   * Register callback for raw audio chunks. Fired on each chunk when using start() or feed().
+   * Use with rms() for level meters: onAudioChunk((chunk) => setLevel(rms(chunk))).
    */
-  async start(): Promise<void> {
+  onAudioChunk(callback: (chunk: Float32Array) => void): void {
+    this.onAudioChunkCallback = callback;
+  }
+
+  /**
+   * Start capturing and listening. Requires user gesture (e.g. click) for getUserMedia.
+   * Pass pre-created context/stream to avoid autoplay - create them on click before loading the model.
+   */
+  async start(
+    existingContext?: AudioContext,
+    existingStream?: MediaStream
+  ): Promise<void> {
     this.stopped = false;
-    this.context = new AudioContext();
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (existingContext && existingStream) {
+      this.context = existingContext;
+      this.stream = existingStream;
+    } else {
+      this.context = new AudioContext();
+      if (this.context.state === "suspended") {
+        await this.context.resume();
+      }
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+    if (this.context.state === "suspended") {
+      await this.context.resume();
+    }
 
     this.sampleRate = this.context.sampleRate;
 
@@ -153,21 +207,26 @@ export class WakeWordDetector {
     source.connect(processor);
     processor.connect(this.context.destination);
 
-    processor.port.onmessage = (e: MessageEvent<{ channels: number; data: Float32Array }>) => {
+    processor.port.onmessage = (e: MessageEvent<{ channels?: number; data?: Float32Array; debug?: boolean }>) => {
       if (this.stopped) return;
+      if (e.data.debug) return;
       const { channels, data } = e.data;
+      if (!data) return;
 
       if (!this.engine) {
         this.channels = channels;
-        this.engine = init(this.files, this.sampleRate, channels);
-        this.buffer = new Float32Array(CHUNK_SIZE * channels);
+        this.engine = init(toPlainObject(this.files), this.sampleRate, channels);
+        this.buffer = new Float32Array(this.chunkSize * channels);
       }
 
-      const chunkSamples = CHUNK_SIZE * this.channels;
+      const chunkSamples = this.chunkSize * this.channels;
       for (let i = 0; i < data.length; i++) {
         this.buffer![this.bufferLen++] = data[i];
         if (this.bufferLen >= chunkSamples) {
           const chunk = this.buffer!.slice(0, chunkSamples);
+          if (this.onAudioChunkCallback) {
+            this.onAudioChunkCallback(chunk);
+          }
           const phrase = this.engine!.detect(chunk, this.threshold);
           if (phrase !== null && phrase !== undefined && this.onDetectCallback) {
             if (this.activeSession) closeSession(this.activeSession);
@@ -197,9 +256,10 @@ export class WakeWordDetector {
    */
   feed(audio: Float32Array, sampleRate: number, channels: number = 1): string | null {
     this.ensureEngine(sampleRate, channels);
-    const chunkSamples = CHUNK_SIZE * channels;
+    const chunkSamples = this.chunkSize * channels;
     for (let i = 0; i + chunkSamples <= audio.length; i += chunkSamples) {
       const chunk = audio.subarray(i, i + chunkSamples);
+      this.onAudioChunkCallback?.(chunk);
       const phrase = this.engine!.detect(chunk, this.threshold);
       if (phrase !== null && phrase !== undefined) return phrase;
     }
@@ -210,7 +270,7 @@ export class WakeWordDetector {
     if (!this.engine) {
       this.sampleRate = sampleRate;
       this.channels = channels;
-      this.engine = init(this.files, sampleRate, channels);
+      this.engine = init(toPlainObject(this.files), sampleRate, channels);
     }
   }
 
@@ -290,16 +350,28 @@ export class WakeWordDetector {
       class WakeCaptureProcessor extends AudioWorkletProcessor {
         process(inputs, outputs, params) {
           const input = inputs[0];
-          if (input.length > 0 && input[0].length > 0) {
-            const channels = input[0].length;
-            const frameCount = input[0][0].length;
+          let channels = 0, frameCount = 0;
+          if (input && input.length > 0 && input[0] && input[0].length > 0) {
+            channels = input.length;
+            frameCount = input[0].length;
             const interleaved = new Float32Array(channels * frameCount);
             for (let i = 0; i < frameCount; i++) {
               for (let ch = 0; ch < channels; ch++) {
-                interleaved[i * channels + ch] = input[0][ch][i];
+                interleaved[i * channels + ch] = input[ch][i];
               }
             }
             this.port.postMessage({ channels, data: interleaved }, [interleaved.buffer]);
+          }
+          if (this._debugCount == null) this._debugCount = 0;
+          if (this._debugCount++ < 5) {
+            this.port.postMessage({
+              debug: true,
+              hasInput: !!input,
+              inputLength: input?.length ?? -1,
+              ch0Length: input?.[0]?.length ?? -1,
+              frameCount,
+              channels
+            });
           }
           return true;
         }

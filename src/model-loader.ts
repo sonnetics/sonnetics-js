@@ -37,12 +37,18 @@ function parseTarString(arr: Uint8Array, start: number, len: number): string {
   return new TextDecoder().decode(arr.subarray(start, end));
 }
 
+/** Normalize tar path: strip leading ./ so keys match Rust expectations (manifest.json, models/layer1.onnx). */
+function normalizePath(p: string): string {
+  return p.startsWith("./") ? p.slice(2) : p;
+}
+
 function extractFromTarGz(tarGz: Uint8Array): ModelFiles {
   const tarBytes = decompressSync(tarGz);
   const tar = parseTar(tarBytes);
   const out: ModelFiles = {};
   for (const [path, data] of Object.entries(tar)) {
-    out[path] = data.buffer.slice(
+    const key = normalizePath(path);
+    out[key] = data.buffer.slice(
       data.byteOffset,
       data.byteOffset + data.byteLength
     ) as ArrayBuffer;
@@ -55,7 +61,12 @@ function extractFromTarGz(tarGz: Uint8Array): ModelFiles {
  */
 export async function loadModelPack(url: string): Promise<ModelFiles> {
   const cached = await getCached(url);
-  if (cached) return cached;
+  if (cached) {
+    const normalized = Object.fromEntries(
+      Object.entries(cached).map(([k, v]) => [normalizePath(k), v])
+    ) as ModelFiles;
+    return normalized;
+  }
 
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Failed to fetch model: ${response.statusText}`);
