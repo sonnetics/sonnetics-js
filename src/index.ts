@@ -15,12 +15,4 @@ export {
   type WakeWordDetector,
 } from "./detector.js";
 
-export {
-  loadModelPack,
-  loadModelPackFromPath,
-  loadModelPackFromId,
-  loadModelPackFromPathOrId,
-  type ModelFiles,
-} from "./model-loader.js";
-export { init } from "@sonnetics/core";
 export type { WasmWakeEngine } from "@sonnetics/core";
