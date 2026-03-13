@@ -1,6 +1,6 @@
 {
   "name": "@sonnetics/js",
-  "version": "0.0.1-beta.5",
+  "version": "0.0.1-beta.6",
   "description": "Wake-word inference for JavaScript and TypeScript. High-level API over @sonnetics/core.",
   "type": "module",
   "main": "dist/index.js",
