@@ -210,7 +210,7 @@ export class WakeWordDetector {
     processor.port.onmessage = (e: MessageEvent<{ channels?: number; data?: Float32Array; debug?: boolean }>) => {
       if (this.stopped) return;
       if (e.data.debug) return;
-      const { channels, data } = e.data;
+      const { channels = 1, data } = e.data;
       if (!data) return;
 
       if (!this.engine) {

@@ -66,6 +66,9 @@ fi
 
 npm install  # refresh lockfile
 
+echo "Building (clean dist)..."
+rm -rf dist && npm run build
+
 if [[ "$PUBLISH" != true ]]; then
   echo ""
   echo "npm publish (dry run)..."
@@ -78,6 +81,16 @@ fi
 
 git add package.json package-lock.json
 git commit -m "chore: release $VERSION"
+
+if ! npm whoami &>/dev/null; then
+  echo "Not logged in to npm. Running: npm login"
+  npm login
+  if ! npm whoami &>/dev/null; then
+    echo "Error: npm login failed or was cancelled."
+    exit 1
+  fi
+fi
+
 npm publish --tag "$TAG" --access public
 git tag "v$VERSION"
 

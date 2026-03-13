@@ -4,8 +4,10 @@
   "description": "Wake-word inference for JavaScript and TypeScript. High-level API over @sonnetics/core.",
   "type": "module",
   "main": "dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     }
@@ -14,7 +16,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --no-dts",
+    "build": "tsup src/index.ts --format esm --dts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -22,6 +24,7 @@
     "fflate": "^0.8.2"
   },
   "devDependencies": {
+    "@types/node": "^20",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },
