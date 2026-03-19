@@ -6,13 +6,7 @@
  */
 
 export {
-  createDetector,
   type DetectEvent,
-  type DetectorOptions,
-  rms,
   Wakeword,
-  type WakewordCreateOptions,
   type WakeWordDetector,
 } from "./detector.js";
-
-export type { WasmWakeEngine } from "@sonnetics/core";

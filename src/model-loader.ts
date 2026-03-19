@@ -57,26 +57,6 @@ function extractFromTarGz(tarGz: Uint8Array): ModelFiles {
 }
 
 /**
- * Load model pack from URL. Fetches tar.gz, extracts all files, caches by filename.
- */
-export async function loadModelPack(url: string): Promise<ModelFiles> {
-  const cached = await getCached(url);
-  if (cached) {
-    const normalized = Object.fromEntries(
-      Object.entries(cached).map(([k, v]) => [normalizePath(k), v])
-    ) as ModelFiles;
-    return normalized;
-  }
-
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Failed to fetch model: ${response.statusText}`);
-  const tarGz = new Uint8Array(await response.arrayBuffer());
-  const files = extractFromTarGz(tarGz);
-  await setCached(url, files);
-  return files;
-}
-
-/**
  * Load model pack from file path (Node.js only).
  */
 export async function loadModelPackFromPath(path: string): Promise<ModelFiles> {
@@ -98,27 +78,17 @@ const CDN_BASE = "https://cdn.sonnetics.com/models";
  */
 export async function loadModelPackFromId(modelId: string): Promise<ModelFiles> {
   const url = `${CDN_BASE}/sonnetics-model-${modelId}.tar.gz`;
-  return loadModelPack(url);
-}
-
-/** True if string looks like a UUID (with or without hyphens). */
-function isModelId(s: string): boolean {
-  const u = s.replace(/-/g, "").toLowerCase();
-  return /^[0-9a-f]{32}$/.test(u);
-}
-
-/**
- * Load model pack from path or model ID.
- * If pathOrId looks like a UUID, fetches from CDN; otherwise loads from local .tar.gz path.
- */
-export async function loadModelPackFromPathOrId(
-  pathOrModelId: string
-): Promise<ModelFiles> {
-  if (isModelId(pathOrModelId)) {
-    return loadModelPackFromId(pathOrModelId);
+  const cached = await getCached(url);
+  if (cached) {
+    return Object.fromEntries(
+      Object.entries(cached).map(([k, v]) => [normalizePath(k), v])
+    ) as ModelFiles;
   }
-  if (!pathOrModelId.endsWith(".tar.gz")) {
-    throw new Error("Path must point to a .tar.gz file");
-  }
-  return loadModelPackFromPath(pathOrModelId);
+  const response = await fetch(url);
+  if (!response.ok)
+    throw new Error(`Failed to fetch model: ${response.statusText}`);
+  const tarGz = new Uint8Array(await response.arrayBuffer());
+  const files = extractFromTarGz(tarGz);
+  await setCached(url, files);
+  return files;
 }

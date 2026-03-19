@@ -1,200 +1,155 @@
-/**
- * Wake word detector. Captures audio via AudioWorklet, runs inference, triggers onDetect.
- * Supports start()/stop() for mic capture and feed() for manual audio.
- */
-
 import { init, type WasmWakeEngine } from "@sonnetics/core";
 import {
-  loadModelPackFromPath,
-  loadModelPackFromPathOrId,
   loadModelPackFromId,
+  loadModelPackFromPath,
   type ModelFiles,
 } from "./model-loader.js";
 
-export interface DetectorOptions {
-  /** Model ID (UUID). Fetches from https://cdn.sonnetics.com/models/sonnetics-model-{id}.tar.gz */
-  wakewordId?: string;
-  /** Path to local .tar.gz model file. Node.js only. Must end with .tar.gz. */
-  wakeWordPath?: string;
-  /** Detection threshold 0–1. Default 0.25. */
-  threshold?: number;
-  /** Samples per chunk (per channel). Affects onAudioChunk callback rate. Default 2048. */
-  chunkSize?: number;
-}
-
-/** Root-mean-square of audio samples. Use with onAudioChunk for level meters. */
-export function rms(samples: Float32Array): number {
-  if (samples.length === 0) return 0;
-  let sum = 0;
-  for (let i = 0; i < samples.length; i++) {
-    const x = samples[i];
-    sum += x * x;
-  }
-  return Math.sqrt(sum / samples.length);
-}
+// ─── Public types ────────────────────────────────────────────────────────────
 
 export interface DetectEvent {
-  /** Detected phrase (e.g. "wake" for binary, or phrase from manifest labels). */
+  /** Detected phrase (e.g. "wake" for binary, or a label from the model manifest). */
   phrase: string;
   audio: {
     /** Sample rate in Hz (e.g. 16000, 44100). */
     sampleRate: number;
     /** Number of channels (1 = mono, 2 = stereo). Chunks are interleaved [L,R,L,R,...]. */
     channels: number;
-    /** Async iterable of original interleaved audio chunks (f32). */
+    /** Yields fixed-size windows of the original audio following detection. */
     read(seconds: number): AsyncIterable<Float32Array>;
   };
 }
 
+// ─── Wakeword factory ────────────────────────────────────────────────────────
+
+type WakewordParams =
+  | { modelId: string; path?: never; threshold?: number; chunkSize?: number }
+  | { path: string; modelId?: never; threshold?: number; chunkSize?: number };
+
+/**
+ * Factory for creating a {@link WakeWordDetector}.
+ *
+ * @example
+ * const detector = await Wakeword.create({ modelId: "550e8400-e29b-41d4-a716-446655440000" });
+ * const detector = await Wakeword.create({ path: "/path/to/model.tar.gz" });
+ */
+export const Wakeword = {
+  async create({
+    modelId,
+    path,
+    threshold = DEFAULT_THRESHOLD,
+    chunkSize = DEFAULT_CHUNK_SIZE,
+  }: WakewordParams): Promise<WakeWordDetector> {
+    let files: ModelFiles;
+    if (modelId) {
+      files = await loadModelPackFromId(modelId);
+    } else if (path) {
+      if (!path.endsWith(".tar.gz")) {
+        throw new Error("path must point to a .tar.gz file");
+      }
+      files = await loadModelPackFromPath(path);
+    } else {
+      throw new Error("Provide modelId or path");
+    }
+    return new WakeWordDetector(files, threshold, chunkSize);
+  },
+};
+
+// ─── Internal ────────────────────────────────────────────────────────────────
+
 const DEFAULT_THRESHOLD = 0.25;
 const DEFAULT_CHUNK_SIZE = 2048;
 
-/** Ensure plain object for WASM boundary (avoids "files must be an object" from IndexedDB/structured clone). */
+/** Strip proxy/structured-clone wrappers before crossing the WASM boundary. */
 function toPlainObject(files: ModelFiles): Record<string, ArrayBuffer> {
   return Object.fromEntries(Object.entries(files));
 }
 
-/**
- * Create a detector. Provide wakewordId or wakeWordPath.
- */
-export async function createDetector(
-  options: DetectorOptions
-): Promise<WakeWordDetector> {
-  const {
-    wakewordId,
-    wakeWordPath,
-    threshold = DEFAULT_THRESHOLD,
-    chunkSize = DEFAULT_CHUNK_SIZE,
-  } = options;
-
-  let files: ModelFiles;
-  if (wakewordId) {
-    files = await loadModelPackFromId(wakewordId);
-  } else if (wakeWordPath) {
-    if (!wakeWordPath.endsWith(".tar.gz")) {
-      throw new Error("wakeWordPath must be a path to a .tar.gz file");
-    }
-    files = await loadModelPackFromPath(wakeWordPath);
-  } else {
-    throw new Error("Provide wakewordId or wakeWordPath");
-  }
-
-  return new WakeWordDetector(files, threshold, chunkSize);
-}
-
-export interface WakewordCreateOptions {
-  /** Detection threshold 0–1. Default 0.25. */
-  threshold?: number;
-  /** Samples per chunk (per channel). Default 2048. */
-  chunkSize?: number;
-}
-
-/**
- * Wakeword: simple factory for creating a detector from path or model ID.
- *
- * @example
- * const detector = await Wakeword.create("path/to/model.tar.gz");
- * const detector = await Wakeword.create("550e8400-e29b-41d4-a716-446655440000");
- */
-export const Wakeword = {
-  async create(
-    pathOrModelId: string,
-    options?: WakewordCreateOptions
-  ): Promise<WakeWordDetector> {
-    const files = await loadModelPackFromPathOrId(pathOrModelId);
-    return new WakeWordDetector(
-      files,
-      options?.threshold ?? DEFAULT_THRESHOLD,
-      options?.chunkSize ?? DEFAULT_CHUNK_SIZE
-    );
-  },
-};
-
-interface DetectSession {
+interface AudioSession {
   buffer: Float32Array[];
-  streamConsumers: Set<() => void>;
+  consumers: Set<() => void>;
   closed: boolean;
   hasConsumer: boolean;
 }
 
-function createSession(): DetectSession {
-  return {
-    buffer: [],
-    streamConsumers: new Set(),
-    closed: false,
-    hasConsumer: false,
-  };
+function createAudioSession(): AudioSession {
+  return { buffer: [], consumers: new Set(), closed: false, hasConsumer: false };
 }
 
-function closeSession(session: DetectSession): void {
+function closeAudioSession(session: AudioSession): void {
   session.closed = true;
-  session.streamConsumers.forEach((resume) => resume());
-  session.streamConsumers.clear();
+  session.consumers.forEach((resume) => resume());
+  session.consumers.clear();
 }
+
+// ─── WakeWordDetector ────────────────────────────────────────────────────────
 
 export class WakeWordDetector {
-  private files: ModelFiles;
-  private threshold: number;
-  private chunkSize: number;
+  private readonly files: ModelFiles;
+  private readonly threshold: number;
+  private readonly chunkSize: number;
+
   private engine: WasmWakeEngine | null = null;
-  private onDetectCallback: ((ev: DetectEvent) => void | Promise<void>) | null =
-    null;
+  private onDetectCallback: ((ev: DetectEvent) => void | Promise<void>) | null = null;
   private onAudioChunkCallback: ((chunk: Float32Array) => void) | null = null;
+
   private context: AudioContext | null = null;
   private stream: MediaStream | null = null;
-  private activeSession: DetectSession | null = null;
+  private activeSession: AudioSession | null = null;
+
   private buffer: Float32Array | null = null;
   private bufferLen = 0;
   private channels = 1;
+  private sampleRate = 0;
   private stopped = false;
-  private sampleRate: number = 16000; // set when start() or feed() first runs
 
-  constructor(files: ModelFiles, threshold: number, chunkSize: number = DEFAULT_CHUNK_SIZE) {
-    this.files = files;
+  constructor(
+    files: ModelFiles,
+    threshold: number,
+    chunkSize: number = DEFAULT_CHUNK_SIZE
+  ) {
     if (threshold < 0 || threshold > 1) {
       throw new Error("threshold must be between 0 and 1");
     }
     if (chunkSize <= 0 || !Number.isInteger(chunkSize)) {
       throw new Error("chunkSize must be a positive integer");
     }
+    this.files = files;
     this.threshold = threshold;
     this.chunkSize = chunkSize;
   }
 
-  /**
-   * Register callback for wake detection. Call start() to begin capturing.
-   */
+  /** Register a callback invoked when the wake word is detected. */
   onDetect(callback: (ev: DetectEvent) => void | Promise<void>): void {
     this.onDetectCallback = callback;
   }
 
   /**
-   * Register callback for raw audio chunks. Fired on each chunk when using start() or feed().
-   * Use with rms() for level meters: onAudioChunk((chunk) => setLevel(rms(chunk))).
+   * Register a callback invoked for every audio chunk processed.
+   * Fired whether using {@link start} or {@link feed}.
    */
   onAudioChunk(callback: (chunk: Float32Array) => void): void {
     this.onAudioChunkCallback = callback;
   }
 
   /**
-   * Start capturing and listening. Requires user gesture (e.g. click) for getUserMedia.
-   * Pass pre-created context/stream to avoid autoplay - create them on click before loading the model.
+   * Start mic capture via AudioWorklet and begin detection.
+   *
+   * Requires a user gesture (e.g. a button click) for `getUserMedia`.
+   * Pass a pre-created `AudioContext` and `MediaStream` to avoid autoplay
+   * restrictions — create them on the click event before awaiting model load.
    */
-  async start(
-    existingContext?: AudioContext,
-    existingStream?: MediaStream
-  ): Promise<void> {
+  async start(context?: AudioContext, stream?: MediaStream): Promise<void> {
     this.stopped = false;
-    if (existingContext && existingStream) {
-      this.context = existingContext;
-      this.stream = existingStream;
+
+    if (context && stream) {
+      this.context = context;
+      this.stream = stream;
     } else {
       this.context = new AudioContext();
-      if (this.context.state === "suspended") {
-        await this.context.resume();
-      }
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     }
+
     if (this.context.state === "suspended") {
       await this.context.resume();
     }
@@ -207,54 +162,23 @@ export class WakeWordDetector {
     source.connect(processor);
     processor.connect(this.context.destination);
 
-    processor.port.onmessage = (e: MessageEvent<{ channels?: number; data?: Float32Array; debug?: boolean }>) => {
+    processor.port.onmessage = (
+      e: MessageEvent<{ channels?: number; data?: Float32Array }>
+    ) => {
       if (this.stopped) return;
-      if (e.data.debug) return;
       const { channels = 1, data } = e.data;
       if (!data) return;
-
-      if (!this.engine) {
-        this.channels = channels;
-        this.engine = init(toPlainObject(this.files), this.sampleRate, channels);
-        this.buffer = new Float32Array(this.chunkSize * channels);
-      }
-
-      const chunkSamples = this.chunkSize * this.channels;
-      for (let i = 0; i < data.length; i++) {
-        this.buffer![this.bufferLen++] = data[i];
-        if (this.bufferLen >= chunkSamples) {
-          const chunk = this.buffer!.slice(0, chunkSamples);
-          if (this.onAudioChunkCallback) {
-            this.onAudioChunkCallback(chunk);
-          }
-          const phrase = this.engine!.detect(chunk, this.threshold);
-          if (phrase !== null && phrase !== undefined && this.onDetectCallback) {
-            if (this.activeSession) closeSession(this.activeSession);
-            const session = createSession();
-            this.activeSession = session;
-            const ev = this.createDetectEvent(session, phrase);
-            Promise.resolve(this.onDetectCallback(ev)).catch(console.error);
-          } else if (
-            this.activeSession &&
-            this.activeSession.hasConsumer &&
-            !this.activeSession.closed
-          ) {
-            this.activeSession.buffer.push(chunk.slice());
-            this.activeSession.streamConsumers.forEach((resume) => resume());
-            this.activeSession.streamConsumers.clear();
-          }
-          this.bufferLen = 0;
-        }
-      }
+      this.processChunk(data, this.sampleRate, channels);
     };
   }
 
-
   /**
-   * Manually feed audio samples (f32, interleaved). Runs detection; returns the detected phrase or null.
-   * Downmixing is done by the Rust engine. Use when handling audio yourself instead of start().
+   * Feed audio samples manually (f32, interleaved). Returns the detected phrase or `null`.
+   *
+   * Use this instead of {@link start} when managing your own audio pipeline (e.g. Node.js).
+   * Downmixing is handled by the engine.
    */
-  feed(audio: Float32Array, sampleRate: number, channels: number = 1): string | null {
+  feed(audio: Float32Array, sampleRate: number, channels = 1): string | null {
     this.ensureEngine(sampleRate, channels);
     const chunkSamples = this.chunkSize * channels;
     for (let i = 0; i + chunkSamples <= audio.length; i += chunkSamples) {
@@ -266,21 +190,11 @@ export class WakeWordDetector {
     return null;
   }
 
-  private ensureEngine(sampleRate: number, channels: number): void {
-    if (!this.engine) {
-      this.sampleRate = sampleRate;
-      this.channels = channels;
-      this.engine = init(toPlainObject(this.files), sampleRate, channels);
-    }
-  }
-
-  /**
-   * Stop capturing and release resources.
-   */
+  /** Stop mic capture and release all resources. */
   stop(): void {
     this.stopped = true;
     if (this.activeSession) {
-      closeSession(this.activeSession);
+      closeAudioSession(this.activeSession);
       this.activeSession = null;
     }
     this.stream?.getTracks().forEach((t) => t.stop());
@@ -289,54 +203,103 @@ export class WakeWordDetector {
     this.context = null;
   }
 
-  private createDetectEvent(session: DetectSession, phrase: string): DetectEvent {
-    const self = this;
+  // ─── Private ───────────────────────────────────────────────────────────────
+
+  private ensureEngine(sampleRate: number, channels: number): void {
+    if (!this.engine) {
+      this.sampleRate = sampleRate;
+      this.channels = channels;
+      this.engine = init(toPlainObject(this.files), sampleRate, channels);
+    }
+  }
+
+  private processChunk(data: Float32Array, sampleRate: number, channels: number): void {
+    if (!this.engine) {
+      this.channels = channels;
+      this.engine = init(toPlainObject(this.files), sampleRate, channels);
+      this.buffer = new Float32Array(this.chunkSize * channels);
+    }
+
+    const chunkSamples = this.chunkSize * this.channels;
+    for (let i = 0; i < data.length; i++) {
+      this.buffer![this.bufferLen++] = data[i];
+      if (this.bufferLen >= chunkSamples) {
+        const chunk = this.buffer!.slice(0, chunkSamples);
+        this.onAudioChunkCallback?.(chunk);
+
+        const phrase = this.engine!.detect(chunk, this.threshold);
+        if (phrase !== null && phrase !== undefined) {
+          if (this.activeSession) closeAudioSession(this.activeSession);
+          const session = createAudioSession();
+          this.activeSession = session;
+          const ev = this.buildDetectEvent(session, phrase);
+          Promise.resolve(this.onDetectCallback?.(ev)).catch(console.error);
+        } else if (
+          this.activeSession?.hasConsumer &&
+          !this.activeSession.closed
+        ) {
+          this.activeSession.buffer.push(chunk.slice());
+          this.activeSession.consumers.forEach((resume) => resume());
+          this.activeSession.consumers.clear();
+        }
+
+        this.bufferLen = 0;
+      }
+    }
+  }
+
+  private buildDetectEvent(session: AudioSession, phrase: string): DetectEvent {
+    const { sampleRate, channels, chunkSize, threshold } = this;
+    const engine = this.engine!;
+    const stopped = () => this.stopped;
+    const clearActive = () => {
+      if (this.activeSession === session) this.activeSession = null;
+    };
+
     return {
       phrase,
       audio: {
-        sampleRate: self.sampleRate,
-        channels: self.channels,
+        sampleRate,
+        channels,
         read(seconds: number): AsyncIterable<Float32Array> {
-          const size = Math.floor(seconds * self.sampleRate * self.channels);
+          const windowSize = Math.floor(seconds * sampleRate * channels);
           return {
             async *[Symbol.asyncIterator]() {
               try {
                 session.hasConsumer = true;
                 const buf: number[] = [];
+
                 const flush = (): Float32Array | null => {
-                  if (buf.length >= size) {
-                    const chunk = new Float32Array(size);
-                    for (let i = 0; i < size; i++) chunk[i] = buf.shift()!;
-                    return chunk;
-                  }
-                  return null;
+                  if (buf.length < windowSize) return null;
+                  const out = new Float32Array(windowSize);
+                  for (let i = 0; i < windowSize; i++) out[i] = buf.shift()!;
+                  return out;
                 };
-                while (!self.stopped && !session.closed) {
-                  let got = false;
+
+                while (!stopped() && !session.closed) {
+                  let received = false;
                   while (session.buffer.length > 0) {
                     const arr = session.buffer.shift()!;
                     for (let i = 0; i < arr.length; i++) buf.push(arr[i]);
-                    got = true;
-                    let c: Float32Array | null;
-                    while ((c = flush()) !== null) yield c;
+                    received = true;
+                    let chunk: Float32Array | null;
+                    while ((chunk = flush()) !== null) yield chunk;
                   }
-                  if (!got) {
+                  if (!received) {
                     await new Promise<void>((resolve) => {
-                      session.streamConsumers.add(resolve);
+                      session.consumers.add(resolve);
                     });
                   }
                 }
-                // drain remainder
-                while (buf.length >= size) {
-                  const chunk = new Float32Array(size);
-                  for (let i = 0; i < size; i++) chunk[i] = buf.shift()!;
-                  yield chunk;
-                }
+
+                // Drain any remaining buffered audio.
+                let chunk: Float32Array | null;
+                while ((chunk = flush()) !== null) yield chunk;
               } finally {
                 session.closed = true;
-                if (self.activeSession === session) self.activeSession = null;
-                session.streamConsumers.forEach((resume) => resume());
-                session.streamConsumers.clear();
+                clearActive();
+                session.consumers.forEach((resume) => resume());
+                session.consumers.clear();
               }
             },
           };
@@ -348,31 +311,18 @@ export class WakeWordDetector {
   private async createProcessor(): Promise<AudioWorkletNode> {
     const workletCode = `
       class WakeCaptureProcessor extends AudioWorkletProcessor {
-        process(inputs, outputs, params) {
+        process(inputs) {
           const input = inputs[0];
-          let channels = 0, frameCount = 0;
-          if (input && input.length > 0 && input[0] && input[0].length > 0) {
-            channels = input.length;
-            frameCount = input[0].length;
-            const interleaved = new Float32Array(channels * frameCount);
-            for (let i = 0; i < frameCount; i++) {
-              for (let ch = 0; ch < channels; ch++) {
-                interleaved[i * channels + ch] = input[ch][i];
-              }
+          if (!input?.length || !input[0]?.length) return true;
+          const channels = input.length;
+          const frameCount = input[0].length;
+          const interleaved = new Float32Array(channels * frameCount);
+          for (let i = 0; i < frameCount; i++) {
+            for (let ch = 0; ch < channels; ch++) {
+              interleaved[i * channels + ch] = input[ch][i];
             }
-            this.port.postMessage({ channels, data: interleaved }, [interleaved.buffer]);
           }
-          if (this._debugCount == null) this._debugCount = 0;
-          if (this._debugCount++ < 5) {
-            this.port.postMessage({
-              debug: true,
-              hasInput: !!input,
-              inputLength: input?.length ?? -1,
-              ch0Length: input?.[0]?.length ?? -1,
-              frameCount,
-              channels
-            });
-          }
+          this.port.postMessage({ channels, data: interleaved }, [interleaved.buffer]);
           return true;
         }
       }

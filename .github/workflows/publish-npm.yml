@@ -1,0 +1,32 @@
+# Publish @sonnetics/js to npm on tag push.
+#
+# Setup (Trusted Publishing): npmjs.com → package @sonnetics/js → Settings →
+#   Trusted publishing → Add GitHub Actions → workflow: publish-npm.yml
+#
+# Release: ./release.sh  (bumps, commits, tags, pushes)
+
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Publish to npm
+        run: npm publish --tag beta --access public
