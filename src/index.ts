@@ -9,4 +9,11 @@ export {
   type DetectEvent,
   Wakeword,
   type WakeWordDetector,
+  type WakewordParams,
 } from "./detector.js";
+export {
+  loadModelPackFromId,
+  loadModelPackFromPath,
+  loadModelPackFromUrl,
+  type ModelFiles,
+} from "./model-loader.js";

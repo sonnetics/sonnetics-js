@@ -74,10 +74,10 @@ export async function loadModelPackFromPath(path: string): Promise<ModelFiles> {
 const CDN_BASE = "https://cdn.sonnetics.com/models";
 
 /**
- * Load model pack by model ID from CDN. Fetches sonnetics-model-{modelId}.tar.gz.
+ * Load model pack from an HTTP(S) URL. Fetches a .tar.gz archive (e.g. presigned S3/R2 URL).
+ * Works in browser and Node. Responses are cached by full URL (including query string).
  */
-export async function loadModelPackFromId(modelId: string): Promise<ModelFiles> {
-  const url = `${CDN_BASE}/sonnetics-model-${modelId}.tar.gz`;
+export async function loadModelPackFromUrl(url: string): Promise<ModelFiles> {
   const cached = await getCached(url);
   if (cached) {
     return Object.fromEntries(
@@ -85,10 +85,31 @@ export async function loadModelPackFromId(modelId: string): Promise<ModelFiles> 
     ) as ModelFiles;
   }
   const response = await fetch(url);
-  if (!response.ok)
-    throw new Error(`Failed to fetch model: ${response.statusText}`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch model (${response.status} ${response.statusText}). URL: ${url}`
+    );
+  }
   const tarGz = new Uint8Array(await response.arrayBuffer());
   const files = extractFromTarGz(tarGz);
   await setCached(url, files);
   return files;
+}
+
+/**
+ * Load model pack by model ID from CDN. Fetches {modelId}.tar.gz.
+ * Model ID should include the full filename stem (e.g. sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620).
+ */
+export async function loadModelPackFromId(modelId: string): Promise<ModelFiles> {
+  const url = `${CDN_BASE}/${modelId}.tar.gz`;
+  try {
+    return await loadModelPackFromUrl(url);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Failed to fetch model")) {
+      throw new Error(
+        `${err.message} Please ensure your model ID is correct and your model is public.`
+      );
+    }
+    throw err;
+  }
 }

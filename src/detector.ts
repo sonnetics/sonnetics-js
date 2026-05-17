@@ -2,6 +2,7 @@ import { init, type WasmWakeEngine } from "@sonnetics/core";
 import {
   loadModelPackFromId,
   loadModelPackFromPath,
+  loadModelPackFromUrl,
   type ModelFiles,
 } from "./model-loader.js";
 
@@ -22,38 +23,65 @@ export interface DetectEvent {
 
 // ─── Wakeword factory ────────────────────────────────────────────────────────
 
-type WakewordParams =
-  | { modelId: string; path?: never; threshold?: number; chunkSize?: number }
-  | { path: string; modelId?: never; threshold?: number; chunkSize?: number };
+export type WakewordParams =
+  | { modelId: string; path?: never; url?: never; threshold?: number; chunkSize?: number }
+  | { path: string; modelId?: never; url?: never; threshold?: number; chunkSize?: number }
+  | { url: string; modelId?: never; path?: never; threshold?: number; chunkSize?: number };
 
 /**
  * Factory for creating a {@link WakeWordDetector}.
  *
  * @example
- * const detector = await Wakeword.create({ modelId: "550e8400-e29b-41d4-a716-446655440000" });
+ * const detector = await Wakeword.create({ modelId: "sonnetics-model-550e8400-e29b-41d4-a716-446655440000" });
  * const detector = await Wakeword.create({ path: "/path/to/model.tar.gz" });
+ * const detector = await Wakeword.create({ url: presignedDownloadUrl });
  */
 export const Wakeword = {
   async create({
     modelId,
     path,
+    url,
     threshold = DEFAULT_THRESHOLD,
     chunkSize = DEFAULT_CHUNK_SIZE,
   }: WakewordParams): Promise<WakeWordDetector> {
-    let files: ModelFiles;
-    if (modelId) {
-      files = await loadModelPackFromId(modelId);
-    } else if (path) {
-      if (!path.endsWith(".tar.gz")) {
-        throw new Error("path must point to a .tar.gz file");
-      }
-      files = await loadModelPackFromPath(path);
-    } else {
-      throw new Error("Provide modelId or path");
-    }
+    const files = await loadModelFiles({ modelId, path, url });
     return new WakeWordDetector(files, threshold, chunkSize);
   },
 };
+
+async function loadModelFiles({
+  modelId,
+  path,
+  url,
+}: Pick<WakewordParams, "modelId" | "path" | "url">): Promise<ModelFiles> {
+  const sources = [modelId, path, url].filter(Boolean);
+  if (sources.length !== 1) {
+    throw new Error("Provide exactly one of modelId, path, or url");
+  }
+  if (modelId) {
+    return loadModelPackFromId(modelId);
+  }
+  if (path) {
+    if (!path.endsWith(".tar.gz")) {
+      throw new Error("path must point to a .tar.gz file");
+    }
+    return loadModelPackFromPath(path);
+  }
+  return loadModelPackFromUrl(parseHttpUrl(url!));
+}
+
+function parseHttpUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("url must be a valid HTTP(S) URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("url must use http or https");
+  }
+  return parsed.href;
+}
 
 // ─── Internal ────────────────────────────────────────────────────────────────
 
@@ -135,20 +163,21 @@ export class WakeWordDetector {
   /**
    * Start mic capture via AudioWorklet and begin detection.
    *
-   * Requires a user gesture (e.g. a button click) for `getUserMedia`.
-   * Pass a pre-created `AudioContext` and `MediaStream` to avoid autoplay
-   * restrictions — create them on the click event before awaiting model load.
+   * Browser only. Requires a user gesture (e.g. button click) for getUserMedia and
+   * AudioContext — call start() directly in a click handler. You can create the
+   * detector earlier (e.g. on page load) to avoid model download delay on first click.
    */
-  async start(context?: AudioContext, stream?: MediaStream): Promise<void> {
+  async start(): Promise<void> {
+    if (typeof navigator === "undefined" || typeof AudioContext === "undefined") {
+      throw new Error(
+        "detector.start() requires a browser environment (Web Audio API). Use detector.feed() in Node.js."
+      );
+    }
+
     this.stopped = false;
 
-    if (context && stream) {
-      this.context = context;
-      this.stream = stream;
-    } else {
-      this.context = new AudioContext();
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    }
+    this.context = new AudioContext();
+    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     if (this.context.state === "suspended") {
       await this.context.resume();

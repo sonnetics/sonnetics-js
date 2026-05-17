@@ -1,6 +1,11 @@
 /node_modules
 /dist
+/dist-browser-test
 *.tsbuildinfo
 .DS_Store
 .idea
 .vscode
+
+# Playwright
+/playwright-report
+/test-results

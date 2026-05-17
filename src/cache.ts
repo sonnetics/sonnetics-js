@@ -114,8 +114,10 @@ async function getNodeCacheDir(key: string): Promise<string> {
   const { homedir, platform } = await import("node:os");
   const { createHash } = await import("node:crypto");
   const hash = createHash("sha256").update(key).digest("hex");
-  const base = platform() === "win32"
-    ? join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "sonnetics", "cache")
-    : join(homedir(), ".cache", "sonnetics");
+  const base =
+    process.env.SONNETICS_CACHE_DIR ??
+    (platform() === "win32"
+      ? join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "sonnetics", "cache")
+      : join(homedir(), ".cache", "sonnetics"));
   return join(base, hash);
 }

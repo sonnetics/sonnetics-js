@@ -17,29 +17,46 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:browser-test": "vite build -c tests/browser/vite.config.ts",
+    "test:browser": "npm run build && npm run build:browser-test && playwright test",
+    "test:browser:headed": "npm run build && npm run build:browser-test && playwright test --headed",
+    "test:browser:debug": "npm run build && npm run build:browser-test && playwright test --headed --debug",
+    "test:all": "npm run test && npm run test:browser"
   },
   "dependencies": {
-    "@sonnetics/core": "^0.0.1-beta.7",
+    "@sonnetics/core": "^0.0.1-beta.16",
     "fflate": "^0.8.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "vite-plugin-wasm": "^3.6.0",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "serve": "^14.2.0",
+    "vite": "^6.0.0",
     "@types/node": "^20",
     "tsup": "^8.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
   },
   "keywords": [
     "wake-word",
-    "speech",
     "voice",
-    "voice-detection",
-    "sonnetics"
+    "voice-command",
+    "speech",
+    "audio"
   ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sonnetics/sonnetics-js.git"
   },
   "homepage": "https://sonnetics.com",
+  "documentation": "https://sonnetics.com/documentation/javascript",
+  "bugs": {
+    "url": "https://github.com/sonnetics/sonnetics-js/issues"
+  },
   "readme": "README.md",
   "license": "Apache-2.0"
 }

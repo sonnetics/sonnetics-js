@@ -1,6 +1,7 @@
 import { Wakeword } from "@sonnetics/js";
 
-const detector = await Wakeword.create({ modelId: "your-model-id" });
+// Detector can be created with a public model ID, a presigned/private URL, or a local .tar.gz file path (Node only).
+const detector = await Wakeword.create({ modelId: "sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620" });
 
 // Assume you have audio from somewhere
 const chunks: Float32Array[] = [];

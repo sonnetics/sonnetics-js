@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Bump version, commit, tag, push. Triggers publish workflow (npm).
+# Do not edit "version" in package.json by hand — this script increments *-beta.N.
 # Usage: ./release.sh [--dry-run]
 # Requires clean working tree.
 
