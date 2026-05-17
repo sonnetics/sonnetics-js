@@ -1,7 +1,11 @@
 # Publish @sonnetics/js to npm on tag push.
 #
-# Setup (Trusted Publishing): npmjs.com → package @sonnetics/js → Settings →
-#   Trusted publishing → Add GitHub Actions → workflow: publish-npm.yml
+# Auth: npm Trusted Publishing (OIDC). No NPM_TOKEN required.
+#   Configure once at npmjs.com -> @sonnetics/js -> Settings -> Trusted Publishing:
+#     Owner: sonnetics, Repo: sonnetics-js, Workflow: publish-npm.yml
+#
+# Provenance (--provenance) requires this GitHub repository to be public.
+# Publish will fail with E422 until the repo visibility is changed.
 #
 # Release: ./release.sh  (bumps, commits, tags, pushes)
 
@@ -11,22 +15,31 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.0.1-beta.7)"
+        required: true
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+          registry-url: https://registry.npmjs.org
 
       - run: npm ci
 
       - run: npm run build
 
       - name: Publish to npm
-        run: npm publish --tag beta --access public
+        run: npm publish --tag beta --access public --provenance
