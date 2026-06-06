@@ -9,7 +9,7 @@ import { describe, expect, it, beforeAll } from "vitest";
 import { Detector } from "@sonnetics/js";
 import { FIXTURES_DIR, loadWavAsFloats } from "./helpers.js";
 
-const KNOWN_MODEL_ID = "sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620";
+const KNOWN_MODEL_ID = "sonnetics-model-a770c126-a4ff-4be4-b95e-7e104a01da73";
 const CDN_URL = `https://cdn.sonnetics.com/models/${KNOWN_MODEL_ID}.tar.gz`;
 
 describe.each([

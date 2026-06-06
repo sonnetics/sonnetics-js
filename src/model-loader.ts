@@ -120,7 +120,7 @@ export async function loadModelPackFromUrl(url: string): Promise<ModelFiles> {
 
 /**
  * Load model pack by model ID from CDN. Fetches {modelId}.tar.gz.
- * Accepts a bare UUID or the canonical stem (e.g. sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620).
+ * Accepts a bare UUID or the canonical stem (e.g. sonnetics-model-a770c126-a4ff-4be4-b95e-7e104a01da73).
  */
 export async function loadModelPackFromId(modelId: string): Promise<ModelFiles> {
   const canonicalId = normalizeModelId(modelId);

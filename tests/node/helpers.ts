@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const FIXTURES_DIR = join(__dirname, "fixtures");
 
-export const KNOWN_MODEL_ID = "sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620";
+export const KNOWN_MODEL_ID = "sonnetics-model-a770c126-a4ff-4be4-b95e-7e104a01da73";
 export const CDN_URL = `https://cdn.sonnetics.com/models/${KNOWN_MODEL_ID}.tar.gz`;
 
 /**

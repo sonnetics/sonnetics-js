@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizeModelId, Detector } from "@sonnetics/js";
 
-const UUID = "efea8354-3f81-4c61-9d50-7452cb901620";
+const UUID = "a770c126-a4ff-4be4-b95e-7e104a01da73";
 const CANONICAL = `sonnetics-model-${UUID}`;
 
 describe("normalizeModelId", () => {

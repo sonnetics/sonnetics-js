@@ -4,7 +4,7 @@
 
 import { Detector } from "@sonnetics/js";
 
-const KNOWN_MODEL_ID = "sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620";
+const KNOWN_MODEL_ID = "sonnetics-model-a770c126-a4ff-4be4-b95e-7e104a01da73";
 
 async function loadWavAsFloats(
     url: string,

@@ -3,7 +3,7 @@ import { Detector } from "@sonnetics/js";
 // ─── Sonnetics ────────────────────────────────────────────────────────────────
 
 const detector = await Detector.create({
-    modelId: "sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620",
+    modelId: "sonnetics-model-a770c126-a4ff-4be4-b95e-7e104a01da73",
 });
 
 detector.onDetect(() => {
@@ -28,6 +28,7 @@ function setListening(on) {
 }
 
 setStatus("Ready — click Start to listen");
+setListening(false);
 
 btnEl.addEventListener("click", async () => {
     if (listening) {
