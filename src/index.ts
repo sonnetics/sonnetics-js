@@ -6,14 +6,16 @@
  */
 
 export {
-  type DetectEvent,
-  Wakeword,
-  type WakeWordDetector,
-  type WakewordParams,
+    type DetectEvent,
+    Detector,
+    type WakeWordDetector,
+    type DetectorParams,
 } from "./detector.js";
 export {
-  loadModelPackFromId,
-  loadModelPackFromPath,
-  loadModelPackFromUrl,
-  type ModelFiles,
+    loadModelPackFromId,
+    loadModelPackFromPath,
+    loadModelPackFromUrl,
+    MODEL_ID_PREFIX,
+    normalizeModelId,
+    type ModelFiles,
 } from "./model-loader.js";

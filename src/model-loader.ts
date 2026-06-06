@@ -73,6 +73,28 @@ export async function loadModelPackFromPath(path: string): Promise<ModelFiles> {
 
 const CDN_BASE = "https://cdn.sonnetics.com/models";
 
+export const MODEL_ID_PREFIX = "sonnetics-model-";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Normalize a model ID to the canonical CDN stem `sonnetics-model-{uuid}`.
+ * Accepts either a bare UUID or the prefixed form.
+ */
+export function normalizeModelId(modelId: string): string {
+  const trimmed = modelId.trim();
+  const uuidPart = trimmed.startsWith(MODEL_ID_PREFIX)
+    ? trimmed.slice(MODEL_ID_PREFIX.length)
+    : trimmed;
+  if (!UUID_RE.test(uuidPart)) {
+    throw new Error(
+      `Invalid model ID '${modelId}': expected a UUID or sonnetics-model-{uuid}`
+    );
+  }
+  return `${MODEL_ID_PREFIX}${uuidPart.toLowerCase()}`;
+}
+
 /**
  * Load model pack from an HTTP(S) URL. Fetches a .tar.gz archive (e.g. presigned S3/R2 URL).
  * Works in browser and Node. Responses are cached by full URL (including query string).
@@ -98,16 +120,17 @@ export async function loadModelPackFromUrl(url: string): Promise<ModelFiles> {
 
 /**
  * Load model pack by model ID from CDN. Fetches {modelId}.tar.gz.
- * Model ID should include the full filename stem (e.g. sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620).
+ * Accepts a bare UUID or the canonical stem (e.g. sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620).
  */
 export async function loadModelPackFromId(modelId: string): Promise<ModelFiles> {
-  const url = `${CDN_BASE}/${modelId}.tar.gz`;
+  const canonicalId = normalizeModelId(modelId);
+  const url = `${CDN_BASE}/${canonicalId}.tar.gz`;
   try {
     return await loadModelPackFromUrl(url);
   } catch (err) {
     if (err instanceof Error && err.message.startsWith("Failed to fetch model")) {
       throw new Error(
-        `${err.message} Please ensure your model ID is correct and your model is public.`
+        `${err.message} Please ensure your model ID is correct.`
       );
     }
     throw err;

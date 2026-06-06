@@ -2,59 +2,76 @@
  * Runs in browser. Loads WAV fixtures, tests detection via feed(), exposes result for Playwright.
  */
 
-import { Wakeword } from "@sonnetics/js";
+import { Detector } from "@sonnetics/js";
 
 const KNOWN_MODEL_ID = "sonnetics-model-efea8354-3f81-4c61-9d50-7452cb901620";
 
-async function loadWavAsFloats(url: string): Promise<{ audio: Float32Array; sampleRate: number }> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.statusText}`);
-  const arrayBuffer = await res.arrayBuffer();
-  const ctx = new (window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-  const buffer = await ctx.decodeAudioData(arrayBuffer);
-  await ctx.close();
-  const ch0 = buffer.getChannelData(0);
-  const channels = buffer.numberOfChannels;
-  let audio: Float32Array;
-  if (channels === 1) {
-    audio = ch0;
-  } else {
-    audio = new Float32Array(buffer.length * channels);
-    for (let i = 0; i < buffer.length; i++) {
-      for (let c = 0; c < channels; c++) {
-        audio[i * channels + c] = buffer.getChannelData(c)[i];
-      }
+async function loadWavAsFloats(
+    url: string,
+): Promise<{ audio: Float32Array; sampleRate: number }> {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.statusText}`);
+    const arrayBuffer = await res.arrayBuffer();
+    const ctx = new (
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext
+    )();
+    const buffer = await ctx.decodeAudioData(arrayBuffer);
+    await ctx.close();
+    const ch0 = buffer.getChannelData(0);
+    const channels = buffer.numberOfChannels;
+    let audio: Float32Array;
+    if (channels === 1) {
+        audio = ch0;
+    } else {
+        audio = new Float32Array(buffer.length * channels);
+        for (let i = 0; i < buffer.length; i++) {
+            for (let c = 0; c < channels; c++) {
+                audio[i * channels + c] = buffer.getChannelData(c)[i];
+            }
+        }
     }
-  }
-  return { audio, sampleRate: buffer.sampleRate };
+    return { audio, sampleRate: buffer.sampleRate };
 }
 
 interface TestResult {
-  ok: boolean;
-  error?: string;
-  test?: string;
+    ok: boolean;
+    error?: string;
+    test?: string;
 }
 
 async function main() {
-  const results: TestResult[] = [];
-  try {
-    const { audio, sampleRate } = await loadWavAsFloats("/tests/fixtures/positive.wav");
-    const detector = await Wakeword.create({ modelId: KNOWN_MODEL_ID });
-    const phrase = detector.feed(audio, sampleRate, 1);
-    results.push({ ok: phrase !== null && phrase !== undefined, test: "positive" });
-  } catch (e) {
-    results.push({ ok: false, error: String(e), test: "positive" });
-  }
-  try {
-    const { audio, sampleRate } = await loadWavAsFloats("/tests/fixtures/negative.wav");
-    const detector = await Wakeword.create({ modelId: KNOWN_MODEL_ID });
-    const phrase = detector.feed(audio, sampleRate, 1);
-    results.push({ ok: phrase === null || phrase === undefined, test: "negative" });
-  } catch (e) {
-    results.push({ ok: false, error: String(e), test: "negative" });
-  }
-  (window as unknown as { __browserTestResults: TestResult[] }).__browserTestResults = results;
+    const results: TestResult[] = [];
+    try {
+        const { audio, sampleRate } = await loadWavAsFloats(
+            "/tests/fixtures/positive.wav",
+        );
+        const detector = await Detector.create({ modelId: KNOWN_MODEL_ID });
+        const phrase = detector.feed(audio, sampleRate, 1);
+        results.push({
+            ok: phrase !== null && phrase !== undefined,
+            test: "positive",
+        });
+    } catch (e) {
+        results.push({ ok: false, error: String(e), test: "positive" });
+    }
+    try {
+        const { audio, sampleRate } = await loadWavAsFloats(
+            "/tests/fixtures/negative.wav",
+        );
+        const detector = await Detector.create({ modelId: KNOWN_MODEL_ID });
+        const phrase = detector.feed(audio, sampleRate, 1);
+        results.push({
+            ok: phrase === null || phrase === undefined,
+            test: "negative",
+        });
+    } catch (e) {
+        results.push({ ok: false, error: String(e), test: "negative" });
+    }
+    (
+        window as unknown as { __browserTestResults: TestResult[] }
+    ).__browserTestResults = results;
 }
 
 main();
