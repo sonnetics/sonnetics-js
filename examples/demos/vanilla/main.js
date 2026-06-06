@@ -1,18 +1,16 @@
 import { Detector } from "@sonnetics/js";
 
-// ─── Sonnetics ────────────────────────────────────────────────────────────────
-
 const detector = await Detector.create({
     modelId: "sonnetics-model-a770c126-a4ff-4be4-b95e-7e104a01da73",
 });
 
 detector.onDetect(() => {
     detector.stop();
-    setStatus("🎉 Wake word detected!");
+    setStatus("Wake word detected!");
     setListening(false);
 });
 
-// ─── UI ───────────────────────────────────────────────────────────────────────
+// --- UI ---
 
 const statusEl = document.getElementById("status");
 const btnEl = document.getElementById("btn");
@@ -27,7 +25,7 @@ function setListening(on) {
     btnEl.disabled = false;
 }
 
-setStatus("Ready — click Start to listen");
+setStatus('Listening for "' + detector.phrase + '" - click Start');
 setListening(false);
 
 btnEl.addEventListener("click", async () => {
@@ -39,13 +37,13 @@ btnEl.addEventListener("click", async () => {
     }
 
     btnEl.disabled = true;
-    setStatus("Requesting microphone…");
+    setStatus("Requesting microphone...");
     try {
         await detector.start();
-        setStatus("Listening…");
+        setStatus("Listening...");
         setListening(true);
     } catch (err) {
-        setStatus(`Mic error: ${err}`);
+        setStatus("Mic error: " + err);
         btnEl.disabled = false;
     }
 });
