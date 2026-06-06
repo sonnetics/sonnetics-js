@@ -1,7 +1,10 @@
-/node_modules
-/dist
+**/node_modules
+**/dist
+**/.next
 /dist-browser-test
 *.tsbuildinfo
+
+# IDE
 .DS_Store
 .idea
 .vscode

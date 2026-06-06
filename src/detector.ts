@@ -8,6 +8,28 @@ import {
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
+const DEFAULT_PHRASE = "wake";
+
+function phraseFromFiles(files: ModelFiles): string {
+    const manifestBytes = files["manifest.json"];
+    if (!manifestBytes) return DEFAULT_PHRASE;
+
+    try {
+        const manifest = JSON.parse(new TextDecoder().decode(manifestBytes));
+        const labels = manifest?.labels;
+        if (Array.isArray(labels) && labels.length >= 2) {
+            const phrase = labels[1];
+            if (typeof phrase === "string" && phrase.length > 0) {
+                return phrase;
+            }
+        }
+    } catch {
+        // Invalid JSON — fall through
+    }
+
+    return DEFAULT_PHRASE;
+}
+
 export interface DetectEvent {
     /** Detected phrase (e.g. "wake" for binary, or a label from the model manifest). */
     phrase: string;
@@ -201,7 +223,14 @@ export class WakeWordDetector {
         this.files = files;
         this.threshold = threshold;
         this.chunkSize = chunkSize;
+        this.#phrase = phraseFromFiles(files);
     }
+
+    /** The wake word phrase this detector listens for (e.g. "Hey Alfred"). */
+    get phrase(): string {
+        return this.#phrase;
+    }
+    #phrase: string;
 
     /** Register a callback invoked when the wake word is detected. */
     onDetect(callback: (ev: DetectEvent) => void | Promise<void>): void {
