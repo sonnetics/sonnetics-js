@@ -16,9 +16,8 @@ npm run dev
 
 The key config is in [`vite.config.ts`](./vite.config.ts):
 
-- `vite-plugin-wasm` -- handles the `@sonnetics/core` WASM file with correct
-  MIME types during dev and build
-- `vite-plugin-top-level-await` -- allows the `await Detector.create()` at the
-  module top level
-- Alias for `@sonnetics/core` -- resolves the JS shim directly so Vite can
-  serve the `.wasm` file alongside it
+- `build.target: "esnext"` — allows top-level `await` in `main.ts`
+- `optimizeDeps.exclude: ["@sonnetics/core"]` — keeps Vite from pre-bundling the
+  WASM glue module
+
+WASM is fetched at runtime from jsDelivr by `@sonnetics/js`; no WASM plugins needed.

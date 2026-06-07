@@ -1,11 +1,16 @@
 # Sonnetics JS Demos
 
+Runnable examples you can copy into your own project. Each demo installs
+`@sonnetics/js` from npm — the same way end users integrate the library.
+
 | Demo | Stack | Bundler config needed? | Key file to look at |
 |---|---|---|---|
 | [vanilla](./vanilla) | Plain HTML + JS (import map) | No | `index.html` |
 | [vite](./vite) | Vite + TypeScript | Minimal — `vite.config.ts` | `vite.config.ts` |
 | [next](./next) | Next.js + React | Minimal — `next.config.ts` | `next.config.ts` |
 | [snippets](./snippets) | API reference patterns | — | Any `.ts` file |
+
+Demo dependency versions are synced by `./release.sh` when publishing.
 
 ## Why bundler config is needed
 
