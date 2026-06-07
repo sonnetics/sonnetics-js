@@ -4,25 +4,33 @@ import { useEffect, useRef, useState } from "react";
 import { Detector } from "@sonnetics/js";
 import type { WakeWordDetector } from "@sonnetics/js";
 
-type UiState = "idle" | "loading" | "listening" | "detected";
+type UiState = "loading" | "idle" | "starting" | "listening" | "detected";
 
 export default function WakeWordButton() {
-    const [state, setState] = useState<UiState>("idle");
+    const [state, setState] = useState<UiState>("loading");
     const [phrase, setPhrase] = useState("");
+    const [error, setError] = useState<string | null>(null);
     const detectorRef = useRef<WakeWordDetector | null>(null);
 
     useEffect(() => {
         Detector.create({
             modelId: "sonnetics-model-a770c126-a4ff-4be4-b95e-7e104a01da73",
-        }).then((d) => {
-            detectorRef.current = d;
-            setPhrase(d.phrase);
-            d.onDetect(() => {
-                d.stop();
-                setState("detected");
+        })
+            .then((d) => {
+                detectorRef.current = d;
+                setPhrase(d.phrase);
+                d.onDetect(() => {
+                    d.stop();
+                    setState("detected");
+                });
+                setState("idle");
+            })
+            .catch((err: unknown) => {
+                console.error("Detector init failed:", err);
+                setError(
+                    err instanceof Error ? err.message : "Failed to load model",
+                );
             });
-            setState("idle");
-        });
         return () => {
             detectorRef.current?.stop();
         };
@@ -32,12 +40,13 @@ export default function WakeWordButton() {
         const d = detectorRef.current;
         if (!d) return;
 
-        if (state === "idle") {
-            setState("loading");
+        if (state === "idle" || state === "detected") {
+            setState("starting");
             try {
                 await d.start();
                 setState("listening");
-            } catch {
+            } catch (err: unknown) {
+                console.error("Failed to start mic:", err);
                 setState("idle");
             }
         } else {
@@ -46,13 +55,16 @@ export default function WakeWordButton() {
         }
     };
 
+    if (error) {
+        return <p style={{ color: "#dc2626" }}>Error: {error}</p>;
+    }
+
     const labels: Record<UiState, string> = {
-        idle: phrase
-            ? 'Listening for "' + phrase + '" - click to start'
-            : "Loading...",
         loading: "Loading model...",
+        idle: phrase ? `Ready — say "${phrase}"` : "Ready",
+        starting: "Starting mic...",
         listening: "Listening...",
-        detected: "Wake word detected!",
+        detected: `Detected "${phrase}" — click to try again`,
     };
 
     return (
@@ -62,7 +74,7 @@ export default function WakeWordButton() {
             </p>
             <button
                 onClick={toggle}
-                disabled={state === "loading" || !phrase}
+                disabled={state === "loading" || state === "starting"}
                 style={{
                     fontSize: "1rem",
                     padding: "0.6rem 2rem",
@@ -70,15 +82,15 @@ export default function WakeWordButton() {
                     borderRadius: 8,
                     background: "#2563eb",
                     color: "white",
-                    cursor: state === "loading" ? "wait" : "pointer",
-                    opacity: state === "loading" || !phrase ? 0.5 : 1,
+                    cursor:
+                        state === "loading" || state === "starting"
+                            ? "wait"
+                            : "pointer",
+                    opacity:
+                        state === "loading" || state === "starting" ? 0.5 : 1,
                 }}
             >
-                {state === "idle"
-                    ? "Start"
-                    : state === "loading"
-                      ? "Loading..."
-                      : "Stop"}
+                {state === "listening" ? "Stop" : "Start"}
             </button>
         </div>
     );

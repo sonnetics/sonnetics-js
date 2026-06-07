@@ -45,15 +45,19 @@ export interface DetectEvent {
 
 // ─── WASM init ──────────────────────────────────────────────────────────────
 
+// Injected at build time from @sonnetics/core/package.json by tsup.config.ts.
+declare const __SONNETICS_CORE_VERSION__: string;
+const CDN_WASM_URL = `https://cdn.jsdelivr.net/npm/@sonnetics/core@${__SONNETICS_CORE_VERSION__}/sonnetics_core_bg.wasm`;
+
 // wasm-pack --target web requires an explicit async init before first use.
 let _wasmReady: Promise<void> | undefined;
 
-function ensureWasmReady(): Promise<void> {
+function ensureWasmReady(wasmUrl?: string): Promise<void> {
     if (_wasmReady) return _wasmReady;
     if (typeof process !== "undefined" && process.versions?.node) {
         _wasmReady = initWasmNode();
     } else {
-        _wasmReady = initWasm().then(() => {});
+        _wasmReady = initWasm(wasmUrl ?? CDN_WASM_URL).then(() => {});
     }
     return _wasmReady;
 }
@@ -74,28 +78,15 @@ async function initWasmNode(): Promise<void> {
 
 // ─── Detector factory ────────────────────────────────────────────────────────
 
-export type DetectorParams =
-    | {
-          modelId: string;
-          path?: never;
-          url?: never;
-          threshold?: number;
-          chunkSize?: number;
-      }
-    | {
-          path: string;
-          modelId?: never;
-          url?: never;
-          threshold?: number;
-          chunkSize?: number;
-      }
-    | {
-          url: string;
-          modelId?: never;
-          path?: never;
-          threshold?: number;
-          chunkSize?: number;
-      };
+export type DetectorParams = {
+    modelId?: string;
+    path?: string;
+    url?: string;
+    threshold?: number;
+    chunkSize?: number;
+    /** Override the auto-detected .wasm URL (useful when bundlers break import.meta.url resolution). */
+    wasmUrl?: string;
+};
 
 /**
  * Factory for creating a {@link WakeWordDetector}.
@@ -111,10 +102,11 @@ export const Detector = {
         modelId,
         path,
         url,
+        wasmUrl,
         threshold = DEFAULT_THRESHOLD,
         chunkSize = DEFAULT_CHUNK_SIZE,
     }: DetectorParams): Promise<WakeWordDetector> {
-        await ensureWasmReady();
+        await ensureWasmReady(wasmUrl);
         const files = await loadModelFiles({ modelId, path, url });
         return new WakeWordDetector(files, threshold, chunkSize);
     },
